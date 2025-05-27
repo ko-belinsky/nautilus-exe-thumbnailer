@@ -1,0 +1,3 @@
+[Thumbnailer Entry]
+Exec=/usr/local/bin/exe-thumbnailer %i %o
+MimeType=application/x-dosexec;application/x-ms-dos-executable;application/vnd.microsoft.portable-executable
