@@ -1,98 +1,85 @@
-# Makefile для установки превью .exe в Nautilus
-.PHONY: install uninstall check-deps install-files cleanup
+# Makefile for EXE thumbnailer installation
+.PHONY: install uninstall
 
 INSTALL_DIR = /usr/local/bin
 THUMBNAILER_DIR = /usr/share/thumbnailers
 SCRIPT_NAME = exe-thumbnailer
 THUMBNAILER_NAME = exe.thumbnailer
 
-install: check-deps install-files cleanup
-    @echo "Установка завершена успешно!"
+install:
+	@echo "Проверка зависимостей..."
+	@if ! command -v wrestool >/dev/null 2>&1 || ! command -v convert >/dev/null 2>&1; then \
+		echo "Установка icoutils и imagemagick..."; \
+		su -c 'apt-get install -y icoutils imagemagick'; \
+	else \
+		echo "Все зависимости уже установлены."; \
+	fi
+	
+	@read -p "Хотите указать текущий цвет фона Nautilus, для заливки \"шахматного фона\"? [y/N] " choice; \
+	if [ "$$choice" = "y" ] || [ "$$choice" = "Y" ]; then \
+		read -p "Введите цвет в формате #xxxxxx: " bg_color; \
+		bg_line="bg_color=\"$$bg_color\"  # Цвет подложки"; \
+	else \
+		bg_line="bg_color=\"none\"  # Прозрачный фон"; \
+	fi; \
+	echo "#!/bin/bash\n\
+input=\"\$$1\"\n\
+output=\"\$$2\"\n\
+temp_dir=\"/tmp/exe-thumbnailer-\$$\"\n\
+$$bg_line\n\
+\n\
+mkdir -p \"\$$temp_dir\"\n\
+cd \"\$$temp_dir\" || exit 1\n\
+\n\
+wrestool -x -t 14 \"\$$input\" -o \"temp.ico\" >/dev/null 2>&1\n\
+\n\
+if [ -f \"temp.ico\" ]; then\n\
+    icotool -x \"temp.ico\" >/dev/null 2>&1\n\
+    largest_png=\$$(find . -name \"temp_*.png\" -exec du -b {} + | sort -nr | head -n1 | cut -f2)\n\
+\n\
+    if [ -f \"\$$largest_png\" ]; then\n\
+        if [ \"\$$bg_color\" = \"none\" ]; then\n\
+            convert \"\$$largest_png\" \\\n\
+                -resize 256x256 \\\n\
+                -unsharp 0.5x0.5+0.5+0.008 \\\n\
+                \"\$$output\" >/dev/null 2>&1\n\
+        else\n\
+            convert -size 256x256 \"xc:\$$bg_color\" \\\n\
+                \"\$$largest_png\" -resize 256x256 -composite \\\n\
+                -unsharp 0.5x0.5+0.5+0.008 \\\n\
+                \"\$$output\" >/dev/null 2>&1\n\
+        fi\n\
+    fi\n\
+fi\n\
+\n\
+if [ ! -f \"\$$output\" ]; then\n\
+    if [ \"\$$bg_color\" = \"none\" ]; then\n\
+        convert \"/usr/share/icons/Adwaita/256x256/mimetypes/application-x-executable.png\" \\\n\
+            -resize 256x256 \"\$$output\" >/dev/null 2>&1\n\
+    else\n\
+        convert -size 256x256 \"xc:\$$bg_color\" \\\n\
+            \"/usr/share/icons/Adwaita/256x256/mimetypes/application-x-executable.png\" \\\n\
+            -resize 224x224 -gravity center -composite \\\n\
+            \"\$$output\" >/dev/null 2>&1\n\
+    fi\n\
+fi\n\
+\n\
+rm -rf \"\$$temp_dir\"\n\
+exit 0" > script.tmp; \
+	echo "[Thumbnailer Entry]\n\
+Exec=$(INSTALL_DIR)/$(SCRIPT_NAME) %i %o\n\
+MimeType=application/x-dosexec;application/x-ms-dos-executable;application/vnd.microsoft.portable-executable" > thumbnailer.tmp; \
+	echo "Копирование файлов..."; \
+	su -c "cp script.tmp $(INSTALL_DIR)/$(SCRIPT_NAME) && \
+	chmod +x $(INSTALL_DIR)/$(SCRIPT_NAME) && \
+	cp thumbnailer.tmp $(THUMBNAILER_DIR)/$(THUMBNAILER_NAME)"; \
+	rm -f script.tmp thumbnailer.tmp; \
+	echo "Очистка кэша превью..."; \
+	pkill nautilus || true; \
+	rm -rf ~/.cache/thumbnails/*; \
+	echo "Установка завершена. Перезапустите Nautilus."
 
 uninstall:
-    @echo "Удаление EXE thumbnailer..."
-    @if [ -f $(INSTALL_DIR)/$(SCRIPT_NAME) ] || [ -f $(THUMBNAILER_DIR)/$(THUMBNAILER_NAME) ]; then \
-        echo "Требуются права root для удаления"; \
-        sudo sh -c '\
-            rm -f $(INSTALL_DIR)/$(SCRIPT_NAME); \
-            rm -f $(THUMBNAILER_DIR)/$(THUMBNAILER_NAME); \
-            echo "Файлы удалены."; \
-        '; \
-    else \
-        echo "Файлы уже удалены."; \
-    fi
-    @echo "Не забудьте очистить кэш: rm -rf ~/.cache/thumbnails/*"
-
-check-deps:
-    @echo "Проверка зависимостей..."
-    @if ! command -v wrestool >/dev/null 2>&1 || ! command -v convert >/dev/null 2>&1; then \
-        echo "Требуются права root для установки зависимостей"; \
-        sudo apt-get install -y icoutils imagemagick; \
-    else \
-        echo "Все зависимости уже установлены."; \
-    fi
-
-install-files:
-    @echo "Создание временных файлов..."
-    @echo "#!/bin/bash" > /tmp/$(SCRIPT_NAME)
-    @echo "input=\"\$1\"" >> /tmp/$(SCRIPT_NAME)
-    @echo "output=\"\$2\"" >> /tmp/$(SCRIPT_NAME)
-    @echo "temp_dir=\"/tmp/exe-thumbnailer-\$\"" >> /tmp/$(SCRIPT_NAME)
-
-    @read -p "Хотите указать цвет фона вместо шахматного? [y/N] " choice; \
-    if [ "\$$choice" = "y" ] || [ "\$$choice" = "Y" ]; then \
-        read -p "Введите цвет в формате #xxxxxx: " bg_color; \
-        echo "bg_color=\"\$$bg_color\"  # Цвет подложки" >> /tmp/$(SCRIPT_NAME); \
-    else \
-        echo "bg_color=\"none\"  # Прозрачный фон" >> /tmp/$(SCRIPT_NAME); \
-    fi
-
-    @cat << 'EOF' >> /tmp/$(SCRIPT_NAME)
-mkdir -p "\$temp_dir"
-cd "\$temp_dir" || exit 1
-
-wrestool -x -t 14 "\$input" -o "temp.ico" >/dev/null 2>&1
-
-if [ -f "temp.ico" ]; then
-    icotool -x "temp.ico" >/dev/null 2>&1
-    largest_png="\$(find . -name "temp_*.png" -exec du -b {} + | sort -nr | head -n1 | cut -f2)"
-
-    if [ -f "\$largest_png" ]; then
-        if [ "\$bg_color" != "none" ]; then
-            convert -size 256x256 "xc:\$bg_color" "\$largest_png" -resize 256x256 -composite -unsharp 0.5x0.5+0.5+0.008 "\$output"
-        else
-            convert "\$largest_png" -resize 256x256 -unsharp 0.5x0.5+0.5+0.008 "\$output"
-        fi
-    fi
-fi
-
-if [ ! -f "\$output" ]; then
-    if [ "\$bg_color" != "none" ]; then
-        convert -size 256x256 "xc:\$bg_color" "/usr/share/icons/Adwaita/256x256/mimetypes/application-x-executable.png" -resize 224x224 -gravity center -composite "\$output"
-    else
-        convert "/usr/share/icons/Adwaita/256x256/mimetypes/application-x-executable.png" -resize 256x256 "\$output"
-    fi
-fi
-
-rm -rf "\$temp_dir"
-exit 0
-EOF
-
-    @echo "[Thumbnailer Entry]" > /tmp/$(THUMBNAILER_NAME)
-    @echo "Exec=$(INSTALL_DIR)/$(SCRIPT_NAME) %i %o" >> /tmp/$(THUMBNAILER_NAME)
-    @echo "MimeType=application/x-dosexec;application/x-ms-dos-executable;application/vnd.microsoft.portable-executable" >> /tmp/$(THUMBNAILER_NAME)
-
-    @echo "Установка файлов (требуются права root)..."
-    @sudo sh -c '\
-        cp /tmp/$(SCRIPT_NAME) $(INSTALL_DIR)/$(SCRIPT_NAME); \
-        chmod +x $(INSTALL_DIR)/$(SCRIPT_NAME); \
-        cp /tmp/$(THUMBNAILER_NAME) $(THUMBNAILER_DIR)/$(THUMBNAILER_NAME); \
-        rm -f /tmp/$(SCRIPT_NAME) /tmp/$(THUMBNAILER_NAME); \
-    '
-    @echo "Файлы установлены."
-
-cleanup:
-    @echo "Очистка кэша превью..."
-    @-pkill nautilus 2>/dev/null || true
-    @-rm -rf ~/.cache/thumbnails/* 2>/dev/null || true
-    @echo "Для завершения установки перезапустите Nautilus"
+	@echo "Удаление EXE thumbnailer..."
+	@su -c "rm -f $(INSTALL_DIR)/$(SCRIPT_NAME) $(THUMBNAILER_DIR)/$(THUMBNAILER_NAME)"
+	@echo "Удаление завершено. Не забудьте очистить кэш: rm -rf ~/.cache/thumbnails/*"
