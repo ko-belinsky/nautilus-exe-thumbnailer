@@ -13,7 +13,7 @@ install:
 		chmod +x /usr/local/bin/exe-thumbnailer"
 	
 	@echo "Перезапуск Nautilus..."
-	@su -c "pkill nautilus && rm -rf $$HOME/.cache/thumbnails/*"
+	@pkill nautilus && rm -rf $$HOME/.cache/thumbnails/*
 	@echo "Установка завершена!"
 
 uninstall:
